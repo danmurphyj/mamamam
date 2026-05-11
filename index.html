@@ -240,6 +240,67 @@
     50%{box-shadow:0 0 22px rgba(0,204,68,.9),0 0 44px rgba(0,204,68,.3)}
   }
 
+  /* ===== JOYSTICK ===== */
+  #joystick-wrap{
+    display:none; /* показывается только на тач-устройствах */
+    position:fixed;bottom:24px;left:24px;z-index:60;
+    pointer-events:auto;user-select:none;
+  }
+  #joystick-base{
+    width:110px;height:110px;border-radius:50%;
+    background:rgba(0,0,0,.55);
+    border:2px solid rgba(61,240,255,.35);
+    position:relative;touch-action:none;
+    box-shadow:0 0 16px rgba(61,240,255,.1);
+  }
+  #joystick-knob{
+    width:46px;height:46px;border-radius:50%;
+    background:rgba(61,240,255,.25);
+    border:2px solid #3df0ff;
+    position:absolute;top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    box-shadow:0 0 10px rgba(61,240,255,.4);
+  }
+  #joystick-wrap.inactive #joystick-base{
+    opacity:.35;
+  }
+
+  /* ===== МОБИЛЬНЫЙ АДАПТИВ ===== */
+  @media (pointer: coarse){
+    #joystick-wrap{ display:block; }
+
+    /* Тикер — мельче */
+    #coin-ticker{ padding:4px 8px;gap:5px }
+    .tick-sym{ font-size:11px }
+    .tick-price,.tick-change{ font-size:10px }
+
+    /* Соцсети — мельче */
+    .social-link{ width:30px;height:30px }
+    #coin-socials{ gap:5px;top:38px }
+
+    /* Нижняя панель: CA прячем, BUY уходит вправо-вниз */
+    #coin-bottom{
+      flex-direction:column;align-items:flex-end;
+      bottom:24px;right:16px;left:auto;width:auto;gap:8px;
+    }
+    #coin-ca{ display:none }
+    #coin-buy{ padding:10px 18px;font-size:13px }
+
+    /* HUD поменьше */
+    #hud{ font-size:10px }
+    #fsbtn{ display:none } /* фулскрин на мобиле не нужен */
+
+    /* Интро — убираем отступы */
+    #intro .frame{ padding:16px 18px }
+    #intro h1{ font-size:clamp(28px,8vw,56px) }
+    #intro ol{ font-size:12px }
+  }
+
+  @media (max-width:480px){
+    #coin-socials{ top:36px;right:8px }
+    #coin-ticker{ left:8px;top:8px }
+  }
 </style>
 </head>
 <body>
@@ -285,6 +346,13 @@
     <a href="#" target="_blank" id="coin-buy">BUY $MAZE</a>
   </div>
 
+</div>
+
+<!-- Джойстик (только мобиль) -->
+<div id="joystick-wrap" class="inactive">
+  <div id="joystick-base">
+    <div id="joystick-knob"></div>
+  </div>
 </div>
 
 <!-- ============ INTRO ============ -->
@@ -817,6 +885,83 @@
       }, 90);
     }
   }, 600);
+
+  // ============== JOYSTICK (мобиль) ==============
+  const jWrap = document.getElementById('joystick-wrap');
+  const jBase = document.getElementById('joystick-base');
+  const jKnob = document.getElementById('joystick-knob');
+
+  const JOY_SPEED = 5;  // SVG-единиц за кадр при макс. отклонении
+  const DEAD_ZONE = 8;  // px — мёртвая зона
+  let jVec = {x:0, y:0};
+  let jTouchId = null;
+  let jWasRunning = false; // для отслеживания смены состояния
+
+  function jUpdate(baseRect, tx, ty){
+    const cx = baseRect.left + baseRect.width  / 2;
+    const cy = baseRect.top  + baseRect.height / 2;
+    let dx = tx - cx, dy = ty - cy;
+    const dist  = Math.sqrt(dx*dx + dy*dy);
+    const maxR  = baseRect.width / 2 - 10;
+    if(dist > maxR){ dx = dx/dist*maxR; dy = dy/dist*maxR; }
+    jKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    jVec = dist < DEAD_ZONE ? {x:0,y:0} : {x: dx/maxR, y: dy/maxR};
+  }
+
+  function jReset(){
+    jKnob.style.transform = 'translate(-50%,-50%)';
+    jVec = {x:0, y:0};
+    jTouchId = null;
+  }
+
+  if(jBase){
+    jBase.addEventListener('touchstart', e=>{
+      e.preventDefault();
+      if(jTouchId !== null) return;
+      const t = e.changedTouches[0];
+      jTouchId = t.identifier;
+      jUpdate(jBase.getBoundingClientRect(), t.clientX, t.clientY);
+    }, {passive:false});
+
+    jBase.addEventListener('touchmove', e=>{
+      e.preventDefault();
+      for(const t of e.changedTouches){
+        if(t.identifier === jTouchId)
+          jUpdate(jBase.getBoundingClientRect(), t.clientX, t.clientY);
+      }
+    }, {passive:false});
+
+    jBase.addEventListener('touchend', e=>{
+      for(const t of e.changedTouches){
+        if(t.identifier === jTouchId) jReset();
+      }
+    }, {passive:false});
+
+    jBase.addEventListener('touchcancel', ()=>jReset(), {passive:true});
+  }
+
+  // RAF-цикл: двигает позицию + синхронизирует вид джойстика с состоянием игры
+  function joyLoop(){
+    // Обновляем вид джойстика (активный/неактивный) при смене running
+    if(jWrap){
+      if(running !== jWasRunning){
+        jWasRunning = running;
+        jWrap.classList.toggle('inactive', !running);
+        if(!running) jReset();
+      }
+    }
+    // Двигаем курсор если игра активна
+    if(running && (jVec.x !== 0 || jVec.y !== 0)){
+      pos.x += jVec.x * JOY_SPEED;
+      pos.y += jVec.y * JOY_SPEED;
+      pos.x  = Math.max(-2, Math.min(1002, pos.x));
+      pos.y  = Math.max(-2, Math.min(602,  pos.y));
+      updateSvgCursor();
+      checkCollisions();
+    }
+    requestAnimationFrame(joyLoop);
+  }
+  requestAnimationFrame(joyLoop);
 
 })();
 </script>
