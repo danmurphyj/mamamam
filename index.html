@@ -816,13 +816,15 @@
     // (non-locked movement is ignored — game only runs while locked)
   });
 
-  // If somehow cursor leaves while not locked (touch/fallback)
+  // Покидание области — только для мыши, не для тач
   maze.addEventListener('mouseleave', ()=>{
-    if(running && !document.pointerLockElement) failLevel();
+    if(running && !document.pointerLockElement && navigator.maxTouchPoints === 0) failLevel();
   });
 
-  // Touch fallback — absolute tracking
+  // Touch на maze — только для десктоп-браузеров без pointer lock
+  // На мобиле управление идёт через джойстик
   maze.addEventListener('touchmove', (e)=>{
+    if(navigator.maxTouchPoints > 0) return; // мобиль — пропускаем, работает джойстик
     if(!e.touches[0]) return;
     e.preventDefault();
     const t = e.touches[0];
@@ -837,25 +839,34 @@
   }, {passive:false});
 
   // ============== BUTTONS ==============
-  $('startBtn').addEventListener('click', ()=>{
+  function doBegin(){
     audio().resume().catch(()=>{});
     startAmbient();
     intro.style.display='none';
     stage.style.display='block';
     loadLevel(0);
-  });
+  }
+  $('startBtn').addEventListener('click', doBegin);
+  $('startBtn').addEventListener('touchend', (e)=>{ e.preventDefault(); doBegin(); });
 
-  // START button in banner: teleport cursor to spawn via pointer lock
-  $('goBtn').addEventListener('click', ()=>{
+  // START button — работает и мышью (pointer lock) и тапом (прямой старт)
+  function doStart(){
     if(armed || running) return;
     pos = {x: LEVELS[level].spawn.x, y: LEVELS[level].spawn.y};
-    waitingForLock = true;
-    maze.requestPointerLock();
-    // Fallback: if pointer lock unavailable, arm without it after 400ms
-    setTimeout(()=>{
-      if(waitingForLock){ waitingForLock = false; if(!armed) armLevel(); }
-    }, 400);
-  });
+    if(navigator.maxTouchPoints > 0){
+      // На мобиле — сразу стартуем без pointer lock
+      armLevel();
+    } else {
+      // На десктопе — через pointer lock
+      waitingForLock = true;
+      maze.requestPointerLock();
+      setTimeout(()=>{
+        if(waitingForLock){ waitingForLock = false; if(!armed) armLevel(); }
+      }, 400);
+    }
+  }
+  $('goBtn').addEventListener('click', doStart);
+  $('goBtn').addEventListener('touchend', (e)=>{ e.preventDefault(); doStart(); });
 
   $('fsbtn').addEventListener('click', ()=>{
     if(!document.fullscreenElement){
@@ -954,8 +965,9 @@
     if(running && (jVec.x !== 0 || jVec.y !== 0)){
       pos.x += jVec.x * JOY_SPEED;
       pos.y += jVec.y * JOY_SPEED;
-      pos.x  = Math.max(-2, Math.min(1002, pos.x));
-      pos.y  = Math.max(-2, Math.min(602,  pos.y));
+      // Не выходим за пределы SVG — курсор всегда внутри экрана
+      pos.x  = Math.max(0, Math.min(1000, pos.x));
+      pos.y  = Math.max(0, Math.min(600,  pos.y));
       updateSvgCursor();
       checkCollisions();
     }
