@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THE MAZE — do not lose focus</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{
+    --bg:#000;
+    --ink:#e9eef7;
+    --path:#3df0ff;
+    --path-dim:#2bbfd0;
+    --start:#ff3416;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:"Arial","Helvetica",sans-serif;overflow:hidden;height:100%}
+  body{background:#000}
+  /* faux CRT scanlines + noise layer */
+  .crt{
+    position:fixed;inset:0;pointer-events:none;z-index:50;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 2px),
+      radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  .noise{
+    position:fixed;inset:-20%;pointer-events:none;z-index:51;opacity:.18;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .35 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    animation:jitter .12s steps(2) infinite;
+    mix-blend-mode:screen;
+  }
+  @keyframes jitter{
+    0%{transform:translate(0,0)}
+    50%{transform:translate(-6px,4px)}
+    100%{transform:translate(3px,-2px)}
+  }
+
+  /* ===== INTRO ===== */
+  #intro{
+    position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;text-align:center;padding:24px;
+    background:#000;color:#fff;
+  }
+  #intro h1{
+    font-family:"Arial Black","Arial",sans-serif;
+    font-size:clamp(40px,8vw,84px);margin:0 0 6px;letter-spacing:.02em;
+    color:#fff;
+    text-shadow:2px 0 0 #ff3416, -2px 0 0 #3df0ff;
+  }
+  #intro h1 small{display:block;font-weight:400;font-family:"Arial",sans-serif;
+    font-size:13px;letter-spacing:.5em;color:#3df0ff;margin-top:8px}
+  #intro .frame{
+    border:2px solid #3df0ff;background:#000;padding:24px 30px;max-width:560px;
+    box-shadow:0 0 0 1px #000, 0 0 30px rgba(61,240,255,.25);
+  }
+  #intro p{font-size:14px;line-height:1.6;margin:10px 0;color:#cfd6e0}
+  #intro .warn{
+    display:inline-block;margin:14px 0 6px;padding:8px 14px;
+    border:2px dashed #ff3416;color:#ff3416;font-weight:bold;letter-spacing:.18em;
+    animation:blink 1s steps(2) infinite;
+  }
+  @keyframes blink{50%{opacity:.25}}
+  #intro ol{text-align:left;font-size:13px;line-height:1.8;margin:8px 0 14px;
+    padding-left:20px;color:#aab2bf}
+  #intro button{
+    font:bold 16px "Arial",sans-serif;background:#ff3416;color:#fff;
+    border:2px solid #fff;padding:10px 28px;cursor:pointer;letter-spacing:.25em;
+  }
+  #intro button:hover{background:#fff;color:#ff3416}
+  #intro .ftr{margin-top:18px;font-size:10px;letter-spacing:.3em;color:#555}
+
+  /* ===== STAGE ===== */
+  #stage{position:fixed;inset:0;z-index:10;display:none;background:#000}
+  #hud{
+    position:absolute;top:10px;left:10px;right:10px;display:flex;
+    justify-content:space-between;align-items:center;font-size:12px;
+    letter-spacing:.2em;color:#cfd6e0;z-index:12;pointer-events:none;
+    font-family:"Arial",sans-serif;
+  }
+  #hud .right{text-align:right}
+  #hud b{color:#3df0ff}
+  #fsbtn{
+    pointer-events:auto;font:11px "Arial",sans-serif;
+    background:#000;color:#3df0ff;border:1px solid #3df0ff;padding:4px 10px;
+    cursor:pointer;letter-spacing:.2em;
+  }
+  #fsbtn:hover{background:#3df0ff;color:#000}
+  #maze{position:absolute;inset:0;width:100%;height:100%;display:block;
+    cursor:crosshair}
+  /* Hide OS cursor while pointer is locked — SVG crosshair takes over */
+  #maze:focus{outline:none}
+  /* level banner */
+  #banner{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    background:#000;border:2px solid #3df0ff;
+    padding:18px 30px;text-align:center;z-index:13;display:none;
+    font-family:"Arial",sans-serif;color:#fff;
+    box-shadow:0 0 24px rgba(61,240,255,.25);
+  }
+  #banner h2{margin:0 0 4px;font-size:28px;letter-spacing:.08em;font-weight:900}
+  #banner p{margin:0;font-size:12px;letter-spacing:.3em;color:#3df0ff}
+  #banner .hint{margin-top:8px;font-size:11px;color:#ff3416;letter-spacing:.18em}
+  #banner button{
+    margin-top:14px;font:bold 14px Arial,sans-serif;background:#ff3416;
+    color:#fff;border:2px solid #fff;padding:8px 22px;cursor:pointer;
+    letter-spacing:.3em;
+  }
+  #banner button:hover{background:#fff;color:#ff3416}
+
+  /* fail toast */
+  #fail{
+    position:absolute;left:50%;top:18%;transform:translateX(-50%);
+    background:#ff3416;color:#fff;padding:6px 14px;border:1px solid #fff;
+    font-weight:bold;letter-spacing:.2em;font-size:12px;z-index:13;display:none;
+    font-family:"Arial",sans-serif;
+  }
+
+  /* tension red vignette that grows */
+  #tension{
+    position:fixed;inset:0;pointer-events:none;z-index:20;
+    box-shadow:inset 0 0 0 0 rgba(170,10,10,0);
+    transition:box-shadow .8s;
+  }
+
+  /* ===== SCREAMER ===== */
+  #scream{
+    position:fixed;inset:0;z-index:100;display:none;
+    background:#000;align-items:center;justify-content:center;
+  }
+  #scream.on{display:flex}
+  #scream video{width:100%;height:100%;object-fit:cover}
+  .shake{animation:shake .08s linear infinite}
+  @keyframes shake{
+    0%{transform:translate(-8px,4px) rotate(-1deg)}
+    25%{transform:translate(9px,-6px) rotate(1.2deg)}
+    50%{transform:translate(-6px,-8px) rotate(-1.5deg)}
+    75%{transform:translate(7px,7px) rotate(.8deg)}
+    100%{transform:translate(-9px,3px) rotate(-1deg)}
+  }
+
+  /* ===== ENDING ===== */
+  #ending{
+    position:fixed;inset:0;z-index:110;display:none;
+    background:#000;color:#ff1a1a;flex-direction:column;
+    align-items:center;justify-content:center;text-align:center;
+    font-family:"Times New Roman",serif;
+  }
+  #ending.on{display:flex}
+  #ending h1{font-size:clamp(48px,10vw,140px);margin:0;letter-spacing:.06em;
+    text-shadow:0 0 18px rgba(255,0,0,.8), 2px 0 0 #0a0aff, -2px 0 0 #fff}
+  #ending .sub{margin-top:14px;color:#fff;letter-spacing:.4em;font-size:13px;
+    font-family:"Courier New",monospace}
+  #ending button{
+    margin-top:28px;font:bold 13px "Courier New",monospace;letter-spacing:.3em;
+    background:transparent;color:#fff;border:1px solid #fff;padding:8px 18px;
+    cursor:pointer;
+  }
+  #ending button:hover{background:#fff;color:#000}
+
+  /* red strobe layer */
+  #strobe{position:fixed;inset:0;z-index:90;background:#ff0000;opacity:0;
+    pointer-events:none;display:none}
+  #strobe.on{display:block;animation:strobe .12s steps(2) 14}
+  @keyframes strobe{50%{opacity:.85}100%{opacity:0}}
+
+  /* ===== MEME COIN OVERLAY ===== */
+  #coin-overlay{
+    position:fixed;inset:0;pointer-events:none;z-index:55;
+    font-family:"Arial",sans-serif;
+  }
+
+  /* Ticker — top left */
+  #coin-ticker{
+    position:absolute;top:10px;left:12px;pointer-events:auto;
+    display:flex;align-items:center;gap:8px;
+    background:rgba(0,0,0,.75);border:1px solid #3df0ff;
+    padding:5px 12px;white-space:nowrap;
+    box-shadow:0 0 10px rgba(61,240,255,.15);
+  }
+  .tick-sym{color:#3df0ff;font-weight:bold;font-size:13px;letter-spacing:.12em}
+  .tick-price{color:#e9eef7;font-size:12px;font-family:"Courier New",monospace}
+  .tick-change{font-size:11px;font-weight:bold;letter-spacing:.08em}
+  .tick-change.up{color:#00e676}
+  .tick-change.down{color:#ff3416}
+
+  /* Socials — top right, под HUD */
+  #coin-socials{
+    position:absolute;top:42px;right:12px;pointer-events:auto;
+    display:flex;gap:8px;align-items:center;
+  }
+  .social-link{
+    width:38px;height:38px;border-radius:50%;overflow:hidden;
+    border:2px solid #3df0ff;display:flex;align-items:center;
+    justify-content:center;text-decoration:none;background:#0a0a0a;
+    transition:border-color .18s, transform .18s;flex-shrink:0;
+    color:#3df0ff;font-size:10px;font-weight:bold;letter-spacing:.05em;
+  }
+  .social-link:hover{border-color:#ff3416;transform:scale(1.12)}
+  .social-link img{
+    width:100%;height:100%;object-fit:cover;display:block;
+    position:absolute;inset:0;
+  }
+  .social-link span{position:relative;z-index:1}
+
+  /* Bottom bar: CA + BUY */
+  #coin-bottom{
+    position:absolute;bottom:10px;left:12px;right:12px;
+    pointer-events:auto;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+  }
+  #coin-ca{
+    display:flex;align-items:center;gap:7px;
+    background:rgba(0,0,0,.75);border:1px solid #333;
+    padding:5px 12px;
+  }
+  .ca-label{color:#555;font-size:10px;letter-spacing:.2em}
+  .ca-addr{
+    color:#aaa;font-family:"Courier New",monospace;
+    font-size:11px;letter-spacing:.04em;
+    max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  #caBtn{
+    font:bold 10px Arial,sans-serif;background:transparent;color:#3df0ff;
+    border:1px solid #3df0ff;padding:3px 8px;cursor:pointer;letter-spacing:.18em;
+    flex-shrink:0;transition:background .15s,color .15s;
+  }
+  #caBtn:hover{background:#3df0ff;color:#000}
+  #caBtn.copied{background:#00e676;border-color:#00e676;color:#000}
+
+  #coin-buy{
+    font:bold 14px "Arial Black",Arial,sans-serif;letter-spacing:.22em;
+    background:#00cc44;color:#000;border:2px solid #fff;
+    padding:7px 22px;text-decoration:none;white-space:nowrap;flex-shrink:0;
+    animation:buyPulse 1.8s ease-in-out infinite;
+    transition:background .15s;
+  }
+  #coin-buy:hover{background:#fff}
+  @keyframes buyPulse{
+    0%,100%{box-shadow:0 0 6px rgba(0,204,68,.5)}
+    50%{box-shadow:0 0 22px rgba(0,204,68,.9),0 0 44px rgba(0,204,68,.3)}
+  }
+
+</style>
+</head>
+<body>
+
+<div class="crt"></div>
+<div class="noise"></div>
+
+<!-- ===== MEME COIN OVERLAY ===== -->
+<div id="coin-overlay">
+
+  <!-- Тикер — левый верхний угол -->
+  <div id="coin-ticker">
+    <span class="tick-sym">$MAZE</span>
+    <span class="tick-price" id="tickPrice">$0.00042069</span>
+    <span class="tick-change up" id="tickChange">▲ +420.69%</span>
+  </div>
+
+  <!-- Соцсети — правый верхний угол (под кнопкой FULLSCREEN) -->
+  <!-- Замени href="#" на ссылки, src="" на свои фото (social1.jpg и т.д.) -->
+  <div id="coin-socials">
+    <a href="#" target="_blank" class="social-link" title="Twitter / X" style="position:relative">
+      <img src="social1.jpg" alt="" onerror="this.remove()">
+      <span>X</span>
+    </a>
+    <a href="#" target="_blank" class="social-link" title="Telegram" style="position:relative">
+      <img src="social2.jpg" alt="" onerror="this.remove()">
+      <span>TG</span>
+    </a>
+    <a href="#" target="_blank" class="social-link" title="Discord" style="position:relative">
+      <img src="social3.jpg" alt="" onerror="this.remove()">
+      <span>DS</span>
+    </a>
+  </div>
+
+  <!-- Низ: контрактный адрес + кнопка Buy -->
+  <!-- Замени CA_ADDRESS на реальный адрес, href="#" у coin-buy на ссылку DEX -->
+  <div id="coin-bottom">
+    <div id="coin-ca">
+      <span class="ca-label">CA</span>
+      <span class="ca-addr" id="caAddr">6qdzMx4c9rL2X3Ns3SwZ8uEo4zReDPjdXpAEmpo7pump</span>
+      <button id="caBtn">COPY</button>
+    </div>
+    <a href="#" target="_blank" id="coin-buy">BUY $MAZE</a>
+  </div>
+
+</div>
+
+<!-- ============ INTRO ============ -->
+<div id="intro">
+  <div class="frame">
+    <h1>The Maze<small>— a test of steadiness —</small></h1>
+    <p>Guide the cursor from <b style="color:#aa0a0a">START</b> to
+       <b style="color:#0a8a1a">FINISH</b> without leaving the path.</p>
+    <p>If you leave the path, it restarts from the beginning.</p>
+    <ol>
+      <li>Move the mouse slowly. Do not rush.</li>
+      <li>The path gets extremely narrow near the end.</li>
+      <li>Keep your focus. Don't look away.</li>
+    </ol>
+    <div class="warn">⚠ TURN YOUR VOLUME UP ⚠</div>
+    <p style="font-size:12px;color:#666">Headphones recommended for full immersion.</p>
+    <p><button id="startBtn">BEGIN &nbsp;»</button></p>
+    <div class="ftr">v1.02 &nbsp; · &nbsp; best viewed in 1024×768</div>
+  </div>
+</div>
+
+<!-- ============ STAGE ============ -->
+<div id="stage">
+  <div id="hud">
+    <div class="right">
+      THE&nbsp;MAZE
+      <button id="fsbtn" title="Fullscreen">[ FULLSCREEN ]</button>
+    </div>
+  </div>
+  <svg id="maze" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet"></svg>
+  <div id="banner">
+    <h2 id="bnTitle">LEVEL 1</h2>
+    <p id="bnSub">follow the cyan path to the red square</p>
+    <div class="hint">if you leave the path — you restart</div>
+    <button id="goBtn">START</button>
+  </div>
+  <div id="fail">YOU LEFT THE PATH — RESTARTING…</div>
+</div>
+
+<!-- ============ EFFECTS ============ -->
+<div id="tension"></div>
+<div id="strobe"></div>
+
+<!-- ============ SCREAMER ============ -->
+<div id="scream">
+  <video id="screamVideo" src="screemer.mp4" playsinline></video>
+</div>
+
+<!-- ============ ENDING ============ -->
+<div id="ending">
+  <h1 id="endTitle">YOU FAILED</h1>
+  <div class="sub" id="endSub">don't look away.</div>
+  <button id="restartBtn">↻ TRY AGAIN</button>
+</div>
+
+<script>
+(() => {
+  // ============================================================
+  //  THE MAZE — game logic
+  // ============================================================
+  const $ = (id) => document.getElementById(id);
+  const intro = $('intro'), stage = $('stage'), maze = $('maze');
+  const banner = $('banner'), fail = $('fail');
+  const bnTitle = $('bnTitle'), bnSub = $('bnSub');
+  const atk = $('atk');
+  const tension = $('tension');
+  const scream = $('scream'), ending = $('ending'), strobe = $('strobe');
+  const endTitle = $('endTitle'), endSub = $('endSub');
+
+  // ============== LEVEL DEFINITIONS ==============
+  const LEVELS = [
+    {   // ===== THE MAZE — the squeeze (scream fires at the end) =====
+      name:'Level 3', sub:'almost there…',
+      start:{x:480, y:60, w:60, h:60},
+      paths:[
+        {x:495, y:120, w:30,  h:60},   // stem down from start
+        {x:495, y:170, w:90,  h:24},   // jog right
+        {x:560, y:180, w:24,  h:60},   // down connector
+        {x:140, y:230, w:444, h:50},   // wide horizontal left
+        {x:140, y:230, w:50,  h:240},  // down on left
+        {x:140, y:420, w:720, h:50},   // bottom run right
+        {x:836, y:420, w:26,  h:106},  // right corner vertical
+        {x:360, y:488, w:500, h:24},   // squeeze entry (wider)
+        {x:160, y:494, w:205, h:12},   // ultra-thin final stretch
+      ],
+      finish:{x:120, y:491, w:44, h:22},
+      spawn:{x:510, y:148},
+      // Scream trigger deep inside the ultra-thin section
+      trigger:{x:165, y:494, w:100, h:12},
+    },
+  ];
+
+  // ============== STATE ==============
+  let level = 0;
+  let attempts = 0;
+  let armed = false;
+  let running = false;
+  let screamFired = false;
+  let pos = {x:0, y:0};
+  let waitingForLock = false;
+
+  // ============== AUDIO (Web Audio API) ==============
+  let actx = null, ambientGain = null, ambientStarted = false;
+  const oscs = [];
+
+  function audio(){
+    if(actx) return actx;
+    actx = new (window.AudioContext||window.webkitAudioContext)();
+    return actx;
+  }
+
+  function startAmbient(){
+    if(ambientStarted) return;
+    const c = audio();
+    ambientStarted = true;
+    ambientGain = c.createGain();
+    ambientGain.gain.value = 0.0001;
+    ambientGain.connect(c.destination);
+
+    const lp = c.createBiquadFilter();
+    lp.type='lowpass'; lp.frequency.value=240; lp.Q.value=4;
+    lp.connect(ambientGain);
+
+    const a = c.createOscillator(); a.type='sawtooth'; a.frequency.value=55;
+    const b = c.createOscillator(); b.type='sawtooth'; b.frequency.value=55.7;
+    a.connect(lp); b.connect(lp); a.start(); b.start();
+    oscs.push(a,b);
+
+    const lfo = c.createOscillator(); lfo.frequency.value=0.18;
+    const lfoG = c.createGain(); lfoG.gain.value=140;
+    lfo.connect(lfoG); lfoG.connect(lp.frequency); lfo.start();
+    oscs.push(lfo);
+
+    const whine = c.createOscillator(); whine.type='sine'; whine.frequency.value=1800;
+    const wG = c.createGain(); wG.gain.value=0.0;
+    whine.connect(wG); wG.connect(c.destination); whine.start();
+    oscs.push(whine);
+    ambientGain.whine = wG;
+
+    ambientGain.gain.linearRampToValueAtTime(0.05, c.currentTime+2.5);
+  }
+
+  function setTension(t){
+    if(!ambientStarted) return;
+    const c = audio();
+    const g = 0.05 + t*0.10;
+    ambientGain.gain.cancelScheduledValues(c.currentTime);
+    ambientGain.gain.linearRampToValueAtTime(g, c.currentTime+0.4);
+
+    const wg = ambientGain.whine;
+    wg.gain.cancelScheduledValues(c.currentTime);
+    wg.gain.linearRampToValueAtTime(0.0006 + t*0.012, c.currentTime+0.4);
+
+    tension.style.boxShadow =
+      `inset 0 0 ${80+220*t}px ${40+120*t}px rgba(170,10,10,${0.05+0.25*t})`;
+  }
+
+  function bumpSfx(){
+    if(!actx) audio();
+    const c = actx;
+    const o = c.createOscillator(); const g = c.createGain();
+    o.type='square'; o.frequency.value=180;
+    g.gain.value=0.0001;
+    g.gain.linearRampToValueAtTime(0.12, c.currentTime+0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime+0.18);
+    o.connect(g).connect(c.destination);
+    o.start(); o.stop(c.currentTime+0.2);
+  }
+
+  function screamSfx(){
+    if(!actx) audio();
+    const c = actx;
+    const now = c.currentTime;
+
+    if(ambientGain){ ambientGain.gain.cancelScheduledValues(now);
+      ambientGain.gain.setValueAtTime(0.0001, now); }
+
+    const bufSize = c.sampleRate * 2.2;
+    const buf = c.createBuffer(1, bufSize, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++){
+      d[i] = (Math.random()*2-1) * (1 - i/bufSize*0.4);
+    }
+    const noise = c.createBufferSource(); noise.buffer = buf;
+    const bp = c.createBiquadFilter(); bp.type='bandpass';
+    bp.frequency.value = 1200; bp.Q.value = 0.8;
+    const ng = c.createGain(); ng.gain.value = 0;
+    ng.gain.setValueAtTime(0, now);
+    ng.gain.linearRampToValueAtTime(0.95, now+0.005);
+    ng.gain.linearRampToValueAtTime(0.7, now+1.2);
+    ng.gain.linearRampToValueAtTime(0.0, now+2.0);
+    noise.connect(bp).connect(ng).connect(c.destination);
+    noise.start(now); noise.stop(now+2.1);
+
+    const o = c.createOscillator(); o.type='sawtooth';
+    o.frequency.setValueAtTime(2200, now);
+    o.frequency.exponentialRampToValueAtTime(140, now+1.6);
+    const og = c.createGain();
+    og.gain.setValueAtTime(0, now);
+    og.gain.linearRampToValueAtTime(0.55, now+0.01);
+    og.gain.linearRampToValueAtTime(0.0, now+1.8);
+    const dist = c.createWaveShaper();
+    const k = 60; const samples = 1024; const curve = new Float32Array(samples);
+    for(let i=0;i<samples;i++){ const x = i*2/samples-1; curve[i] = (3+k)*x/(Math.PI+k*Math.abs(x)); }
+    dist.curve = curve;
+    o.connect(dist).connect(og).connect(c.destination);
+    o.start(now); o.stop(now+1.85);
+
+    const sub = c.createOscillator(); sub.type='sine';
+    sub.frequency.setValueAtTime(80, now);
+    sub.frequency.exponentialRampToValueAtTime(30, now+0.8);
+    const sg = c.createGain();
+    sg.gain.setValueAtTime(0.8, now);
+    sg.gain.exponentialRampToValueAtTime(0.0001, now+1.0);
+    sub.connect(sg).connect(c.destination);
+    sub.start(now); sub.stop(now+1.05);
+  }
+
+  // ============== RENDER LEVEL ==============
+  function renderLevel(idx){
+    const L = LEVELS[idx];
+    const svgNS = 'http://www.w3.org/2000/svg';
+    maze.innerHTML = '';
+
+    const bg = document.createElementNS(svgNS,'rect');
+    bg.setAttribute('x',0); bg.setAttribute('y',0);
+    bg.setAttribute('width',1000); bg.setAttribute('height',600);
+    bg.setAttribute('fill','#000');
+    maze.appendChild(bg);
+
+    L.paths.forEach(p=>{
+      const r = document.createElementNS(svgNS,'rect');
+      r.setAttribute('x',p.x); r.setAttribute('y',p.y);
+      r.setAttribute('width',p.w); r.setAttribute('height',p.h);
+      r.setAttribute('fill','#3df0ff');
+      maze.appendChild(r);
+    });
+
+    const s = document.createElementNS(svgNS,'rect');
+    s.setAttribute('x',L.start.x); s.setAttribute('y',L.start.y);
+    s.setAttribute('width',L.start.w); s.setAttribute('height',L.start.h);
+    s.setAttribute('fill','#ff3416');
+    maze.appendChild(s);
+
+    const sT = document.createElementNS(svgNS,'text');
+    sT.setAttribute('x',L.start.x+L.start.w+8);
+    sT.setAttribute('y',L.start.y+L.start.h/2+5);
+    sT.setAttribute('font-family','Arial,sans-serif');
+    sT.setAttribute('font-size','15');
+    sT.setAttribute('font-weight','bold');
+    sT.setAttribute('fill','#ffffff');
+    sT.textContent='START';
+    maze.appendChild(sT);
+
+    const f = document.createElementNS(svgNS,'rect');
+    f.setAttribute('x',L.finish.x); f.setAttribute('y',L.finish.y);
+    f.setAttribute('width',L.finish.w); f.setAttribute('height',L.finish.h);
+    f.setAttribute('fill','#ff3416');
+    maze.appendChild(f);
+
+    const fA = document.createElementNS(svgNS,'rect');
+    fA.setAttribute('x',L.finish.x-2); fA.setAttribute('y',L.finish.y-2);
+    fA.setAttribute('width',L.finish.w+4); fA.setAttribute('height',L.finish.h+4);
+    fA.setAttribute('fill','none');
+    fA.setAttribute('stroke','#fff');
+    fA.setAttribute('stroke-width','1');
+    fA.setAttribute('opacity','0.6');
+    fA.innerHTML = '<animate attributeName="opacity" values="0.2;0.9;0.2" dur="1.4s" repeatCount="indefinite"/>';
+    maze.appendChild(fA);
+
+    // SVG crosshair cursor — shown during play, hidden otherwise
+    const cur = document.createElementNS(svgNS,'g');
+    cur.id = 'svgCursor';
+    cur.setAttribute('display','none');
+    cur.setAttribute('pointer-events','none');
+    const ch = document.createElementNS(svgNS,'line');
+    ch.setAttribute('x1','-9'); ch.setAttribute('y1','0');
+    ch.setAttribute('x2','9');  ch.setAttribute('y2','0');
+    ch.setAttribute('stroke','#fff'); ch.setAttribute('stroke-width','1.5');
+    const cv = document.createElementNS(svgNS,'line');
+    cv.setAttribute('x1','0'); cv.setAttribute('y1','-9');
+    cv.setAttribute('x2','0'); cv.setAttribute('y2','9');
+    cv.setAttribute('stroke','#fff'); cv.setAttribute('stroke-width','1.5');
+    const cc = document.createElementNS(svgNS,'circle');
+    cc.setAttribute('r','2.5'); cc.setAttribute('fill','#ff3416');
+    cur.appendChild(ch); cur.appendChild(cv); cur.appendChild(cc);
+    maze.appendChild(cur);
+  }
+
+  // ============== COORDS ==============
+  // Accounts for preserveAspectRatio="xMidYMid meet" letterboxing.
+  function toSvg(px, py){
+    const r = maze.getBoundingClientRect();
+    const scale = Math.min(r.width / 1000, r.height / 600);
+    const renderedW = 1000 * scale;
+    const renderedH = 600  * scale;
+    const offsetX = (r.width  - renderedW) / 2;
+    const offsetY = (r.height - renderedH) / 2;
+    return {
+      x: (px - r.left - offsetX) / scale,
+      y: (py - r.top  - offsetY) / scale,
+    };
+  }
+
+  function inViewBox(p){
+    return p.x >= 0 && p.x <= 1000 && p.y >= 0 && p.y <= 600;
+  }
+
+  function pointInRect(x,y, R){
+    return x>=R.x && x<=R.x+R.w && y>=R.y && y<=R.y+R.h;
+  }
+
+  // ============== SVG CURSOR ==============
+  function updateSvgCursor(){
+    const cur = document.getElementById('svgCursor');
+    if(!cur) return;
+    cur.setAttribute('display','block');
+    cur.setAttribute('transform', `translate(${pos.x},${pos.y})`);
+  }
+
+  function hideSvgCursor(){
+    const cur = document.getElementById('svgCursor');
+    if(cur) cur.setAttribute('display','none');
+  }
+
+  // ============== LEVEL FLOW ==============
+  function showBanner(t, s, hint){
+    bnTitle.textContent = t;
+    bnSub.textContent = s;
+    banner.querySelector('.hint').textContent = hint || 'do not touch the blue walls';
+    banner.style.display='block';
+  }
+  function hideBanner(){ banner.style.display='none'; }
+
+  function showFail(){
+    fail.style.display='block';
+    setTimeout(()=>fail.style.display='none', 700);
+  }
+
+  function loadLevel(idx){
+    level = idx;
+    armed = false; running = false;
+    renderLevel(idx);
+    setTension(0.85);
+    showBanner('THE MAZE', LEVELS[idx].sub, 'click START to begin');
+    hideSvgCursor();
+  }
+
+  function armLevel(){
+    armed = true; running = true;
+    hideBanner();
+    updateSvgCursor();
+  }
+
+  function releaseLock(){
+    if(document.pointerLockElement) document.exitPointerLock();
+  }
+
+  function failLevel(){
+    if(!running) return;
+    running = false; armed = false;
+    releaseLock();
+    bumpSfx();
+    hideSvgCursor();
+    attempts++; atk.textContent = attempts;
+    showFail();
+    setTimeout(()=>{
+      showBanner('THE MAZE', 'restart', 'click START to begin');
+    }, 700);
+  }
+
+  function winLevel(){
+    if(!running) return;
+    running = false; armed = false;
+    releaseLock();
+    if(level < LEVELS.length-1){
+      hideSvgCursor();
+      setTimeout(()=> loadLevel(level+1), 350);
+    } else {
+      fireScreamer();
+    }
+  }
+
+  // ============== HIT TESTING ==============
+  function checkCollisions(){
+    if(!running) return;
+    const L = LEVELS[level];
+    const x = pos.x, y = pos.y;
+
+    if(L.trigger && !screamFired){
+      if(pointInRect(x,y,L.trigger)){ fireScreamer(); return; }
+    }
+    if(pointInRect(x,y,L.finish)){ winLevel(); return; }
+    if(pointInRect(x,y,L.start)) return;
+    for(const p of L.paths){
+      if(pointInRect(x,y,p)) return;
+    }
+    failLevel();
+  }
+
+  // ============== SCREAMER ==============
+  function fireScreamer(){
+    if(screamFired) return;
+    screamFired = true;
+    running = false;
+    releaseLock();
+    hideSvgCursor();
+    banner.style.display='none';
+
+    if(document.documentElement.requestFullscreen && !document.fullscreenElement){
+      document.documentElement.requestFullscreen().catch(()=>{});
+    }
+
+    const sv = document.getElementById('screamVideo');
+    if(sv){ sv.currentTime = 0; sv.play().catch(()=>{}); }
+    scream.classList.add('on');
+    document.body.classList.add('shake');
+    screamSfx();
+
+    setTimeout(()=>{ strobe.classList.add('on'); }, 900);
+
+    setTimeout(()=>{
+      scream.classList.remove('on');
+      document.body.classList.remove('shake');
+      strobe.classList.remove('on');
+      if(Math.random()<0.5){
+        endTitle.textContent = 'YOU FAILED';
+        endSub.textContent   = 'i told you not to look away.';
+      } else {
+        endTitle.textContent = "DON'T LOOK AWAY";
+        endSub.textContent   = 'i can still see you.';
+      }
+      ending.classList.add('on');
+    }, 2400);
+  }
+
+  // ============== POINTER LOCK ==============
+  // When lock is acquired → arm the level; when released mid-game → fail
+  document.addEventListener('pointerlockchange', ()=>{
+    if(document.pointerLockElement === maze){
+      if(waitingForLock){ waitingForLock = false; armLevel(); }
+    } else {
+      if(running) failLevel();
+    }
+  });
+
+  // ============== INPUT ==============
+  maze.addEventListener('mousemove', (e)=>{
+    if(document.pointerLockElement === maze){
+      // Locked: use relative delta, scaled to SVG coords
+      const r = maze.getBoundingClientRect();
+      const scale = Math.min(r.width / 1000, r.height / 600);
+      pos.x += e.movementX / scale;
+      pos.y += e.movementY / scale;
+      // Let position go slightly out of bounds so off-path check fires
+      pos.x = Math.max(-2, Math.min(1002, pos.x));
+      pos.y = Math.max(-2, Math.min(602,  pos.y));
+      updateSvgCursor();
+      if(running) checkCollisions();
+    }
+    // (non-locked movement is ignored — game only runs while locked)
+  });
+
+  // If somehow cursor leaves while not locked (touch/fallback)
+  maze.addEventListener('mouseleave', ()=>{
+    if(running && !document.pointerLockElement) failLevel();
+  });
+
+  // Touch fallback — absolute tracking
+  maze.addEventListener('touchmove', (e)=>{
+    if(!e.touches[0]) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const p = toSvg(t.clientX, t.clientY);
+    if(!inViewBox(p)){ if(running) failLevel(); return; }
+    pos.x = p.x; pos.y = p.y;
+    updateSvgCursor();
+    if(!armed){
+      const L = LEVELS[level];
+      if(pointInRect(pos.x,pos.y,L.start)) armLevel();
+    } else checkCollisions();
+  }, {passive:false});
+
+  // ============== BUTTONS ==============
+  $('startBtn').addEventListener('click', ()=>{
+    audio().resume().catch(()=>{});
+    startAmbient();
+    intro.style.display='none';
+    stage.style.display='block';
+    loadLevel(0);
+  });
+
+  // START button in banner: teleport cursor to spawn via pointer lock
+  $('goBtn').addEventListener('click', ()=>{
+    if(armed || running) return;
+    pos = {x: LEVELS[level].spawn.x, y: LEVELS[level].spawn.y};
+    waitingForLock = true;
+    maze.requestPointerLock();
+    // Fallback: if pointer lock unavailable, arm without it after 400ms
+    setTimeout(()=>{
+      if(waitingForLock){ waitingForLock = false; if(!armed) armLevel(); }
+    }, 400);
+  });
+
+  $('fsbtn').addEventListener('click', ()=>{
+    if(!document.fullscreenElement){
+      document.documentElement.requestFullscreen?.().catch(()=>{});
+    } else {
+      document.exitFullscreen?.();
+    }
+  });
+
+  $('restartBtn').addEventListener('click', ()=>{
+    releaseLock();
+    ending.classList.remove('on');
+    screamFired = false;
+    attempts = 0; atk.textContent = 0;
+    setTension(0);
+    loadLevel(0);
+  });
+
+  // Occasional glitch flicker
+  setInterval(()=>{
+    if(!ambientStarted) return;
+    const intensity = level===0?0.04:level===1?0.10:0.22;
+    if(Math.random() < intensity){
+      document.querySelector('.noise').style.opacity = 0.35;
+      setTimeout(()=>{
+        document.querySelector('.noise').style.opacity = 0.10;
+      }, 90);
+    }
+  }, 600);
+
+})();
+</script>
+
+<script>
+// ===== MEME COIN: тикер (DexScreener) =====
+(() => {
+  const tickPrice  = document.getElementById('tickPrice');
+  const tickChange = document.getElementById('tickChange');
+  const caAddr     = document.getElementById('caAddr');
+
+  tickPrice.textContent  = '---';
+  tickChange.textContent = '---';
+  tickChange.className   = 'tick-change';
+
+  let realPrice  = null;
+  let realChange = null;
+  let driftPrice = null;
+
+  function fmtPrice(p){
+    if(p >= 1)      return '$' + p.toFixed(4);
+    if(p >= 0.0001) return '$' + p.toFixed(6);
+    const s = p.toFixed(12);
+    const m = s.match(/^0\.(0+)(\d{1,4})/);
+    return m ? '$0.' + m[1] + m[2] : '$' + p.toExponential(3);
+  }
+
+  function tick(){
+    if(realPrice === null) return;
+
+    const step = realPrice * (Math.random() - 0.499) * 0.003;
+    driftPrice = driftPrice === null ? realPrice : driftPrice + step;
+    const cap = realPrice * 0.008;
+    driftPrice = Math.max(realPrice - cap, Math.min(realPrice + cap, driftPrice));
+
+    tickPrice.textContent = fmtPrice(driftPrice);
+    const up = realChange >= 0;
+    tickChange.textContent = (up ? '▲ +' : '▼ ') + Math.abs(realChange).toFixed(2) + '%';
+    tickChange.className   = 'tick-change ' + (up ? 'up' : 'down');
+  }
+
+  async function fetchPrice(){
+    const ca = caAddr ? caAddr.textContent.trim() : '';
+    if(!ca || ca === 'CA_ADDRESS') return;
+    try {
+      const res  = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${ca}`);
+      if(!res.ok) return;
+      const data = await res.json();
+      const pairs = data.pairs;
+      if(!pairs || !pairs.length) return;
+      const pair = pairs.reduce((best, p) =>
+        (parseFloat(p.liquidity?.usd || 0) > parseFloat(best.liquidity?.usd || 0) ? p : best),
+        pairs[0]
+      );
+      const p = parseFloat(pair.priceUsd);
+      const c = parseFloat(pair.priceChange?.h1 ?? pair.priceChange?.h24 ?? 0);
+      if(!isNaN(p)){ realPrice = p; realChange = c; driftPrice = p; }
+    } catch(_){}
+  }
+
+  setInterval(tick, 1000);
+  fetchPrice();
+  setInterval(fetchPrice, 10_000);
+
+  // ——— Копирование CA ———
+  const caBtn = document.getElementById('caBtn');
+  if(caBtn && caAddr){
+    caBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(caAddr.textContent.trim()).then(() => {
+        caBtn.textContent = 'COPIED!';
+        caBtn.classList.add('copied');
+        setTimeout(() => { caBtn.textContent = 'COPY'; caBtn.classList.remove('copied'); }, 1800);
+      }).catch(() => {
+        const range = document.createRange();
+        range.selectNodeContents(caAddr);
+        const sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(range);
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>
