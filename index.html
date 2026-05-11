@@ -435,17 +435,44 @@
         {x:140, y:230, w:50,  h:240},  // down on left
         {x:140, y:420, w:720, h:50},   // bottom run right
         {x:836, y:420, w:26,  h:106},  // right corner vertical
-        {x:360, y:488, w:500, h:24},   // squeeze entry (wider)
-        {x:160, y:494, w:205, h:12},   // ultra-thin final stretch
+        {x:360, y:488, w:500, h:24},   // squeeze entry
+        {x:160, y:494, w:205, h:12},   // ultra-thin final
       ],
       finish:{x:120, y:491, w:44, h:22},
       spawn:{x:510, y:148},
-      // Scream trigger deep inside the ultra-thin section
       trigger:{x:165, y:494, w:100, h:12},
+      // ---- Мобильный вариант: широкие коридоры для пальца ----
+      mobilePaths:[
+        {x:490, y:120, w:40,  h:60},   // stem
+        {x:490, y:170, w:96,  h:38},   // jog right
+        {x:554, y:180, w:38,  h:66},   // down connector
+        {x:130, y:230, w:462, h:62},   // wide horizontal
+        {x:130, y:230, w:62,  h:242},  // down left
+        {x:130, y:420, w:732, h:62},   // bottom run
+        {x:820, y:420, w:52,  h:112},  // right corner
+        {x:348, y:488, w:524, h:38},   // squeeze entry
+        {x:154, y:496, w:200, h:26},   // final squeeze (шире)
+      ],
+      mobileFinish: {x:114, y:493, w:44, h:32},
+      mobileTrigger:{x:160, y:496, w:100, h:26},
     },
   ];
 
   // ============== STATE ==============
+  const isMobile = navigator.maxTouchPoints > 0;
+
+  // Возвращает нужный вариант уровня (мобиль/десктоп)
+  function getL(idx){
+    const L = LEVELS[idx];
+    if(!isMobile) return L;
+    return {
+      ...L,
+      paths:   L.mobilePaths   || L.paths,
+      finish:  L.mobileFinish  || L.finish,
+      trigger: L.mobileTrigger || L.trigger,
+    };
+  }
+
   let level = 0;
   let attempts = 0;
   let armed = false;
@@ -573,7 +600,7 @@
 
   // ============== RENDER LEVEL ==============
   function renderLevel(idx){
-    const L = LEVELS[idx];
+    const L = getL(idx);
     const svgNS = 'http://www.w3.org/2000/svg';
     maze.innerHTML = '';
 
@@ -623,21 +650,24 @@
     fA.innerHTML = '<animate attributeName="opacity" values="0.2;0.9;0.2" dur="1.4s" repeatCount="indefinite"/>';
     maze.appendChild(fA);
 
-    // SVG crosshair cursor — shown during play, hidden otherwise
+    // SVG crosshair cursor — bigger on mobile
+    const cs = isMobile ? 16 : 9;   // crosshair half-length
+    const cr = isMobile ? 5  : 2.5; // center dot radius
+    const sw = isMobile ? 2.5 : 1.5; // stroke width
     const cur = document.createElementNS(svgNS,'g');
     cur.id = 'svgCursor';
     cur.setAttribute('display','none');
     cur.setAttribute('pointer-events','none');
     const ch = document.createElementNS(svgNS,'line');
-    ch.setAttribute('x1','-9'); ch.setAttribute('y1','0');
-    ch.setAttribute('x2','9');  ch.setAttribute('y2','0');
-    ch.setAttribute('stroke','#fff'); ch.setAttribute('stroke-width','1.5');
+    ch.setAttribute('x1',`-${cs}`); ch.setAttribute('y1','0');
+    ch.setAttribute('x2',`${cs}`);  ch.setAttribute('y2','0');
+    ch.setAttribute('stroke','#fff'); ch.setAttribute('stroke-width',sw);
     const cv = document.createElementNS(svgNS,'line');
-    cv.setAttribute('x1','0'); cv.setAttribute('y1','-9');
-    cv.setAttribute('x2','0'); cv.setAttribute('y2','9');
-    cv.setAttribute('stroke','#fff'); cv.setAttribute('stroke-width','1.5');
+    cv.setAttribute('x1','0'); cv.setAttribute('y1',`-${cs}`);
+    cv.setAttribute('x2','0'); cv.setAttribute('y2',`${cs}`);
+    cv.setAttribute('stroke','#fff'); cv.setAttribute('stroke-width',sw);
     const cc = document.createElementNS(svgNS,'circle');
-    cc.setAttribute('r','2.5'); cc.setAttribute('fill','#ff3416');
+    cc.setAttribute('r',cr); cc.setAttribute('fill','#ff3416');
     cur.appendChild(ch); cur.appendChild(cv); cur.appendChild(cc);
     maze.appendChild(cur);
   }
@@ -739,7 +769,7 @@
   // ============== HIT TESTING ==============
   function checkCollisions(){
     if(!running) return;
-    const L = LEVELS[level];
+    const L = getL(level);
     const x = pos.x, y = pos.y;
 
     if(L.trigger && !screamFired){
@@ -902,11 +932,13 @@
   const jBase = document.getElementById('joystick-base');
   const jKnob = document.getElementById('joystick-knob');
 
-  const JOY_SPEED = 5;  // SVG-единиц за кадр при макс. отклонении
-  const DEAD_ZONE = 8;  // px — мёртвая зона
-  let jVec = {x:0, y:0};
+  const JOY_SPEED = 2.8; // SVG-единиц за кадр при макс. отклонении
+  const DEAD_ZONE = 10;  // px — мёртвая зона
+  const JOY_EASE  = 0.18; // плавность: 0=нет инерции, 1=максимальная
+  let jVec  = {x:0, y:0}; // целевой вектор (от пальца)
+  let jCur  = {x:0, y:0}; // текущий сглаженный вектор
   let jTouchId = null;
-  let jWasRunning = false; // для отслеживания смены состояния
+  let jWasRunning = false;
 
   function jUpdate(baseRect, tx, ty){
     const cx = baseRect.left + baseRect.width  / 2;
@@ -922,6 +954,7 @@
   function jReset(){
     jKnob.style.transform = 'translate(-50%,-50%)';
     jVec = {x:0, y:0};
+    jCur = {x:0, y:0};
     jTouchId = null;
   }
 
@@ -961,10 +994,16 @@
         if(!running) jReset();
       }
     }
+    // Плавное сглаживание вектора (easing)
+    jCur.x += (jVec.x - jCur.x) * JOY_EASE;
+    jCur.y += (jVec.y - jCur.y) * JOY_EASE;
+    if(Math.abs(jCur.x) < 0.01) jCur.x = 0;
+    if(Math.abs(jCur.y) < 0.01) jCur.y = 0;
+
     // Двигаем курсор если игра активна
-    if(running && (jVec.x !== 0 || jVec.y !== 0)){
-      pos.x += jVec.x * JOY_SPEED;
-      pos.y += jVec.y * JOY_SPEED;
+    if(running && (jCur.x !== 0 || jCur.y !== 0)){
+      pos.x += jCur.x * JOY_SPEED;
+      pos.y += jCur.y * JOY_SPEED;
       // Не выходим за пределы SVG — курсор всегда внутри экрана
       pos.x  = Math.max(0, Math.min(1000, pos.x));
       pos.y  = Math.max(0, Math.min(600,  pos.y));
