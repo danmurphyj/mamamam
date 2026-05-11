@@ -202,16 +202,17 @@
   }
   .social-link span{position:relative;z-index:1}
 
-  /* Bottom bar: CA + BUY */
-  #coin-bottom{
-    position:absolute;bottom:10px;left:12px;right:12px;
-    pointer-events:auto;
-    display:flex;align-items:center;justify-content:space-between;gap:12px;
-  }
+  /* CA — top left, below ticker */
   #coin-ca{
+    position:absolute;top:44px;left:12px;pointer-events:auto;
     display:flex;align-items:center;gap:7px;
     background:rgba(0,0,0,.75);border:1px solid #333;
     padding:5px 12px;
+  }
+  /* BUY — bottom right */
+  #coin-bottom{
+    position:absolute;bottom:10px;right:12px;
+    pointer-events:auto;
   }
   .ca-label{color:#555;font-size:10px;letter-spacing:.2em}
   .ca-addr{
@@ -279,12 +280,13 @@
     .social-link{ width:30px;height:30px }
     #coin-socials{ gap:5px;top:38px }
 
-    /* Нижняя панель: CA прячем, BUY уходит вправо-вниз */
-    #coin-bottom{
-      flex-direction:column;align-items:flex-end;
-      bottom:24px;right:16px;left:auto;width:auto;gap:8px;
-    }
-    #coin-ca{ display:none }
+    /* CA — мельче, остаётся видимым */
+    #coin-ca{ top:38px;left:8px;padding:3px 8px;gap:4px }
+    .ca-label{ font-size:9px }
+    .ca-addr{ font-size:9px;max-width:120px }
+    #caBtn{ font-size:8px;padding:2px 6px }
+    /* BUY — правый нижний угол */
+    #coin-bottom{ bottom:24px;right:16px }
     #coin-buy{ padding:10px 18px;font-size:13px }
 
     /* HUD поменьше */
@@ -331,18 +333,19 @@
     </a>
     <a href="#" target="_blank" class="social-link" title="Discord" style="position:relative">
       <img src="social3.jpg" alt="" onerror="this.remove()">
-      <span>DS</span>
+      <span>DEX</span>
     </a>
   </div>
 
-  <!-- Низ: контрактный адрес + кнопка Buy -->
-  <!-- Замени CA_ADDRESS на реальный адрес, href="#" у coin-buy на ссылку DEX -->
+  <!-- CA — top left, below ticker -->
+  <div id="coin-ca">
+    <span class="ca-label">CA</span>
+    <span class="ca-addr" id="caAddr">6qdzMx4c9rL2X3Ns3SwZ8uEo4zReDPjdXpAEmpo7pump</span>
+    <button id="caBtn">COPY</button>
+  </div>
+
+  <!-- BUY — bottom right -->
   <div id="coin-bottom">
-    <div id="coin-ca">
-      <span class="ca-label">CA</span>
-      <span class="ca-addr" id="caAddr">6qdzMx4c9rL2X3Ns3SwZ8uEo4zReDPjdXpAEmpo7pump</span>
-      <button id="caBtn">COPY</button>
-    </div>
     <a href="#" target="_blank" id="coin-buy">BUY $MAZE</a>
   </div>
 
